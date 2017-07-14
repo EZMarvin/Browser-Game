@@ -1,4 +1,4 @@
-var global = require('./global');
+var global = require('./clientConfig');
 
 class ChatClient {
     constructor(params) {
@@ -48,6 +48,7 @@ class ChatClient {
         chatList.appendChild(node);
     }
 
+    // Send chat to all active users
     sendChat(key) {
         var commands = this.commands,
             input = document.getElementById('chatInput');
@@ -55,6 +56,7 @@ class ChatClient {
         key = key.which || key.keyCode;
 
         if (key === global.KEY_ENTER) {
+            console.log("input text :", input.value);
             var text = input.value.replace(/(<([^>]+)>)/ig, '');
             if (text !== '') {
 
@@ -63,7 +65,6 @@ class ChatClient {
                 this.socket.emit('playerChat', { sender: this.player.name, message: text});
                 this.addChatLine(this.player.name, text, true);
             }
-
             // Reset input
             input.value = '';
             this.canvas.cv.focus();

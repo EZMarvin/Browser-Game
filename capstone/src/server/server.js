@@ -25,10 +25,12 @@ var leaderboardChanged = false;
 var V = SAT.Vector;
 var C = SAT.Circle;
 
-
 var initMassLog = util.log(config.defaultPlayerMass, config.slowBase);
 
 app.use(express.static(__dirname + '/../client'));
+
+
+// ---------- Start of socket setup ----------//
 
 io.on('connection', function (socket) {
     console.log('A user connected!', socket.handshake.query.type);
@@ -66,6 +68,7 @@ io.on('connection', function (socket) {
         }
     };
 
+    // Used for create new user
     socket.on('respawn', function () {
         if (util.findIndex(users, currentPlayer.id) > -1)
             users.splice(util.findIndex(users, currentPlayer.id), 1);
@@ -73,6 +76,7 @@ io.on('connection', function (socket) {
         console.log('[INFO] User ' + currentPlayer.name + ' respawned!');
     });
 
+    // Confirm client connected
     socket.on('connectresponse', function (player) {
         console.log('[INFO] Player ' + player.name + ' connecting!');
 
@@ -122,10 +126,6 @@ io.on('connection', function (socket) {
 
     });
 
-    socket.on('pingtoserver', function () {
-        socket.emit('pingtoclient');
-    });
-
     socket.on('windowResized', function (data) {
         currentPlayer.screenWidth = data.screenWidth;
         currentPlayer.screenHeight = data.screenHeight;
@@ -148,45 +148,7 @@ io.on('connection', function (socket) {
         socket.broadcast.emit('serverSendPlayerChat', {sender: _sender, message: _message.substring(0,35)});
     });
 
-    socket.on('kick', function(data) {
-        if (currentPlayer.admin) {
-            var reason = '';
-            var worked = false;
-            for (var e = 0; e < users.length; e++) {
-                if (users[e].name === data[0] && !users[e].admin && !worked) {
-                    if (data.length > 1) {
-                        for (var f = 1; f < data.length; f++) {
-                            if (f === data.length) {
-                                reason = reason + data[f];
-                            }
-                            else {
-                                reason = reason + data[f] + ' ';
-                            }
-                        }
-                    }
-                    if (reason !== '') {
-                       console.log('[ADMIN] User ' + users[e].name + ' kicked successfully by ' + currentPlayer.name + ' for reason ' + reason);
-                    }
-                    else {
-                       console.log('[ADMIN] User ' + users[e].name + ' kicked successfully by ' + currentPlayer.name);
-                    }
-                    socket.emit('serverMSG', 'User ' + users[e].name + ' was kicked by ' + currentPlayer.name);
-                    sockets[users[e].id].emit('kick', reason);
-                    sockets[users[e].id].disconnect();
-                    users.splice(e, 1);
-                    worked = true;
-                }
-            }
-            if (!worked) {
-                socket.emit('serverMSG', 'Could not locate user or user is an admin.');
-            }
-        } else {
-            console.log('[ADMIN] ' + currentPlayer.name + ' is trying to use -kick but isn\'t an admin.');
-            socket.emit('serverMSG', 'You are not permitted to use this command.');
-        }
-    });
-
-    // Heartbeat function, update everytime.
+    // Heartbeat function, update active time.
     socket.on('0', function(target) {
         currentPlayer.lastHeartbeat = new Date().getTime();
         if (target.x !== currentPlayer.x || target.y !== currentPlayer.y) {
@@ -194,8 +156,8 @@ io.on('connection', function (socket) {
         }
     });
 
+    // Fire food
     socket.on('1', function() {
-        // Fire food.
         for(var i=0; i<currentPlayer.cells.length; i++)
         {
             if(((currentPlayer.cells[i].mass >= config.defaultPlayerMass + config.fireFood) && config.fireFood > 0) || (currentPlayer.cells[i].mass >= 20 && config.fireFood === 0)){
@@ -223,6 +185,7 @@ io.on('connection', function (socket) {
             }
         }
     });
+
     socket.on('2', function(virusCell) {
         function splitCell(cell) {
             if(cell.mass >= config.defaultPlayerMass*2) {
@@ -247,7 +210,7 @@ io.on('connection', function (socket) {
               //Split all cells
               if(currentPlayer.cells.length < config.limitSplit && currentPlayer.massTotal >= config.defaultPlayerMass*2) {
                   var numMax = currentPlayer.cells.length;
-                  for(var d=0; d<numMax; d++) {
+                  for(var d=0; d < numMax; d++) {
                       splitCell(currentPlayer.cells[d]);
                   }
               }
@@ -257,7 +220,21 @@ io.on('connection', function (socket) {
     });
 });
 
+// -------- End of socket set up -----------//
+
+// -------- Start of game logic ------------//
+
+function moveloop() {
+    for (var i = 0; i < users.length; i++) {
+        tickPlayer(users[i]);
+    }
+    for (i=0; i < massFood.length; i++) {
+        if(massFood[i].speed > 0) moveMass(massFood[i]);
+    }
+}
+
 function tickPlayer(currentPlayer) {
+    // Update player active time
     if(currentPlayer.lastHeartbeat < new Date().getTime() - config.maxHeartbeatInterval) {
         sockets[currentPlayer.id].emit('kick', 'Last heartbeat received over ' + config.maxHeartbeatInterval + ' ago.');
         sockets[currentPlayer.id].disconnect();
@@ -311,7 +288,7 @@ function tickPlayer(currentPlayer) {
     function collisionCheck(collision) {
         if (collision.aUser.mass > collision.bUser.mass * 1.1  && collision.aUser.radius > Math.sqrt(Math.pow(collision.aUser.x - collision.bUser.x, 2) + Math.pow(collision.aUser.y - collision.bUser.y, 2))*1.75) {
             console.log('[DEBUG] Killing user: ' + collision.bUser.id);
-            console.log('[DEBUG] Collision info:');
+            console.log('[DEBUG] Collision players info:');
             console.log(collision);
 
             var numUser = util.findIndex(users, collision.bUser.id);
@@ -383,49 +360,10 @@ function tickPlayer(currentPlayer) {
     }
 }
 
-function addFood(toAdd) {
-    var radius = util.massToRadius(config.foodMass);
-    while (toAdd--) {
-        var position = config.foodUniformDisposition ? util.uniformPosition(food, radius) : util.randomPosition(radius);
-        food.push({
-            // Make IDs unique.
-            id: ((new Date()).getTime() + '' + food.length) >>> 0,
-            x: position.x,
-            y: position.y,
-            radius: radius,
-            mass: Math.random() + 2,
-            hue: Math.round(Math.random() * 360)
-        });
-    }
-}
-
-function addVirus(toAdd) {
-    while (toAdd--) {
-        var mass = util.randomInRange(config.virus.defaultMass.from, config.virus.defaultMass.to, true);
-        var radius = util.massToRadius(mass);
-        var position = config.virusUniformDisposition ? util.uniformPosition(virus, radius) : util.randomPosition(radius);
-        virus.push({
-            id: ((new Date()).getTime() + '' + virus.length) >>> 0,
-            x: position.x,
-            y: position.y,
-            radius: radius,
-            mass: mass,
-            fill: config.virus.fill,
-            stroke: config.virus.stroke,
-            strokeWidth: config.virus.strokeWidth
-        });
-    }
-}
-
-function removeFood(toRem) {
-    while (toRem--) {
-        food.pop();
-    }
-}
 
 function movePlayer(player) {
     var x =0,y =0;
-    for(var i=0; i<player.cells.length; i++)
+    for(var i=0; i < player.cells.length; i++)
     {
         var target = {
             x: player.x - player.cells[i].x + player.target.x,
@@ -454,10 +392,10 @@ function movePlayer(player) {
         if (!isNaN(deltaX)) {
             player.cells[i].x += deltaX;
         }
-        // Find best solution.
+        // cells merge behaviour 
         for(var j=0; j<player.cells.length; j++) {
             if(j != i && player.cells[i] !== undefined) {
-                var distance = Math.sqrt(Math.pow(player.cells[j].y-player.cells[i].y,2) + Math.pow(player.cells[j].x-player.cells[i].x,2));
+                var distance = Math.sqrt(Math.pow(player.cells[j].y - player.cells[i].y, 2) + Math.pow(player.cells[j].x - player.cells[i].x, 2));
                 var radiusTotal = (player.cells[i].radius + player.cells[j].radius);
                 if(distance < radiusTotal) {
                     if(player.lastSplit > new Date().getTime() - 1000 * config.mergeTimer) {
@@ -480,6 +418,7 @@ function movePlayer(player) {
                 }
             }
         }
+        // Hit game border behaviour
         if(player.cells.length > i) {
             var borderCalc = player.cells[i].radius / 3;
             if (player.cells[i].x > config.gameWidth - borderCalc) {
@@ -498,9 +437,11 @@ function movePlayer(player) {
             y += player.cells[i].y;
         }
     }
+    // keep one player's cells apart
     player.x = x/player.cells.length;
     player.y = y/player.cells.length;
 }
+
 
 function moveMass(mass) {
     var deg = Math.atan2(mass.target.y, mass.target.x);
@@ -531,45 +472,6 @@ function moveMass(mass) {
     }
     if (mass.y < borderCalc) {
         mass.y = borderCalc;
-    }
-}
-
-function balanceMass() {
-    var totalMass = food.length * config.foodMass +
-        users
-            .map(function(u) {return u.massTotal; })
-            .reduce(function(pu,cu) { return pu+cu;}, 0);
-
-    var massDiff = config.gameMass - totalMass;
-    var maxFoodDiff = config.maxFood - food.length;
-    var foodDiff = parseInt(massDiff / config.foodMass) - maxFoodDiff;
-    var foodToAdd = Math.min(foodDiff, maxFoodDiff);
-    var foodToRemove = -Math.max(foodDiff, maxFoodDiff);
-
-    if (foodToAdd > 0) {
-        //console.log('[DEBUG] Adding ' + foodToAdd + ' food to level!');
-        addFood(foodToAdd);
-        //console.log('[DEBUG] Mass rebalanced!');
-    }
-    else if (foodToRemove > 0) {
-        //console.log('[DEBUG] Removing ' + foodToRemove + ' food from level!');
-        removeFood(foodToRemove);
-        //console.log('[DEBUG] Mass rebalanced!');
-    }
-
-    var virusToAdd = config.maxVirus - virus.length;
-
-    if (virusToAdd > 0) {
-        addVirus(virusToAdd);
-    }
-}
-
-function moveloop() {
-    for (var i = 0; i < users.length; i++) {
-        tickPlayer(users[i]);
-    }
-    for (i=0; i < massFood.length; i++) {
-        if(massFood[i].speed > 0) moveMass(massFood[i]);
     }
 }
 
@@ -611,6 +513,76 @@ function gameloop() {
         }
     }
     balanceMass();
+}
+
+function balanceMass() {
+    var totalMass = food.length * config.foodMass +
+        users
+            .map(function(u) {return u.massTotal; })
+            .reduce(function(pu,cu) { return pu+cu;}, 0);
+
+    var massDiff = config.gameMass - totalMass;
+    var maxFoodDiff = config.maxFood - food.length;
+    var foodDiff = parseInt(massDiff / config.foodMass) - maxFoodDiff;
+    var foodToAdd = Math.min(foodDiff, maxFoodDiff);
+    var foodToRemove = -Math.max(foodDiff, maxFoodDiff);
+
+    if (foodToAdd > 0) {
+        //console.log('[DEBUG] Adding ' + foodToAdd + ' food to level!');
+        addFood(foodToAdd);
+        //console.log('[DEBUG] Mass rebalanced!');
+    }
+    else if (foodToRemove > 0) {
+        //console.log('[DEBUG] Removing ' + foodToRemove + ' food from level!');
+        removeFood(foodToRemove);
+        //console.log('[DEBUG] Mass rebalanced!');
+    }
+
+    var virusToAdd = config.maxVirus - virus.length;
+
+    if (virusToAdd > 0) {
+        addVirus(virusToAdd);
+    }
+}
+
+function addFood(toAdd) {
+    var radius = util.massToRadius(config.foodMass);
+    while (toAdd--) {
+        var position = config.foodUniformDisposition ? util.uniformPosition(food, radius) : util.randomPosition(radius);
+        food.push({
+            // Make IDs unique.
+            id: ((new Date()).getTime() + '' + food.length) >>> 0,
+            x: position.x,
+            y: position.y,
+            radius: radius,
+            mass: Math.random() + 2,
+            hue: Math.round(Math.random() * 360)
+        });
+    }
+}
+
+function addVirus(toAdd) {
+    while (toAdd--) {
+        var mass = util.randomInRange(config.virus.defaultMass.from, config.virus.defaultMass.to, true);
+        var radius = util.massToRadius(mass);
+        var position = config.virusUniformDisposition ? util.uniformPosition(virus, radius) : util.randomPosition(radius);
+        virus.push({
+            id: ((new Date()).getTime() + '' + virus.length) >>> 0,
+            x: position.x,
+            y: position.y,
+            radius: radius,
+            mass: mass,
+            fill: config.virus.fill,
+            stroke: config.virus.stroke,
+            strokeWidth: config.virus.strokeWidth
+        });
+    }
+}
+
+function removeFood(toRem) {
+    while (toRem--) {
+        food.pop();
+    }
 }
 
 function sendUpdates() {

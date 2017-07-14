@@ -1,4 +1,4 @@
-var global = require('./global');
+var global = require('./clientConfig');
 
 class Canvas {
     constructor(params)  {
@@ -44,6 +44,7 @@ class Canvas {
         var key = event.which || event.keyCode;
         if (key === global.KEY_FIREFOOD && this.parent.reenviar) {
             this.parent.socket.emit('1');
+            console.log('fire food');
             this.parent.reenviar = false;
         } else if (key === global.KEY_SPLIT && this.parent.reenviar) {
             this.parent.socket.emit('2');
@@ -66,11 +67,12 @@ class Canvas {
         return key == global.KEY_DOWN || key == global.KEY_UP;
     }
 
+    // When key press down get direction key info
     pressDown(event) {
         var key = event.which || event.keyCode;
         var self = this.parent;
         if (self.directional(key)) {
-            self.directionLock = true;
+            this.directionLock = true; // lock the direction to pressed key direction 
             if (self.newDirection(key, self.directions, true)) {
                 self.updateTarget(self.directions);
                 self.socket.emit('0', self.target);
@@ -96,15 +98,15 @@ class Canvas {
     	for (var i = 0, len = list.length; i < len; i++) {
     		if (list[i] == direction) {
     			found = true;
+                // if the key is up then remove the most recent direction
     			if (!isAddition) {
     				result = true;
-    				// Removes the direction.
     				list.splice(i, 1);
     			}
     			break;
     		}
     	}
-    	// Adds the direction.
+    	// Adds new direction.
     	if (isAddition && found === false) {
     		result = true;
     		list.push(direction);
