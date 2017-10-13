@@ -1,4 +1,12 @@
+// This is the server code for my Browser game, it has two major part: Socket.io setup and Game logic
+
+// The reason I chose this part of code: This is the first time complete a full game development. 
+// Although I always want to become a game developer, but I haven't really finished a complete game.
+// With this development experience I realize the importance of collaboration between game level design and development, 
+// some technical problem can be easily sloved by adjusting design, and thought with developemnt tech can also help with a better design 
+
 /*jslint bitwise: true, node: true */
+
 'use strict';
 
 var express = require('express');
